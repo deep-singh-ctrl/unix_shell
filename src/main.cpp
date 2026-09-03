@@ -11,36 +11,7 @@ enum parser_state {
     NORMAL,
     SINGLE_QUOTE_MODE,
     DOUBLE_QUOTE_MODE,
-    ESCAPED
 };
-
-enum current_character {
-    BLANK,
-    SINGLE_QUOTE,
-    DOUBLE_QUOTE,
-    ESCAPE,
-    REGULAR
-};
-
-enum append_operation {
-    NO,
-    YES
-};
-
-const std::vector<std::vector<int>> next_parser_state{
-    {NORMAL , SINGLE_QUOTE_MODE , DOUBLE_QUOTE_MODE , ESCAPED , NORMAL},
-    {SINGLE_QUOTE_MODE, NORMAL, SINGLE_QUOTE_MODE, SINGLE_QUOTE_MODE, SINGLE_QUOTE_MODE},
-    {DOUBLE_QUOTE_MODE, DOUBLE_QUOTE_MODE, NORMAL, DOUBLE_QUOTE_MODE, DOUBLE_QUOTE_MODE},
-    {NORMAL, NORMAL, NORMAL, NORMAL, NORMAL}
-};
-
-const std::vector<std::vector<int>> append_to_token{
-    {NO, NO, NO, NO, YES},
-    {YES, NO, YES, YES, YES},
-    {YES, YES, NO, NO, YES},
-    {YES, YES, YES, YES, YES}
-};
-
 
 void runExecutableFilePath(std::vector<std::string> &userInput){
     const char* env_p = std::getenv("PATH");
@@ -91,46 +62,69 @@ void runExecutableFilePath(std::vector<std::string> &userInput){
     }
 }
 
-int getCharacterState(char ch){
-    switch (ch) {
-    case (' '):
-        return BLANK;
-        break;
-    case ('\''):
-        return SINGLE_QUOTE;
-        break;
-    case ('\"'):
-        return DOUBLE_QUOTE;
-        break;
-    case ('\\'):
-        return ESCAPE;
-        break;
-    default:
-        return REGULAR;
-        break;
-    }
-}
-
-void parseUserInput(std::vector<std::string> &userInput, const std::string &command){
+void parseUserInput(std::vector<std::string> &userInput, 
+    const std::string &command){
     std::string token = "";
     int current_state = NORMAL;
-    for(char ch : command){
-        int current_char = getCharacterState(ch);
-        int next_state = next_parser_state[current_state][current_char];
-        int append = append_to_token[current_state][current_char]; 
-        int toBreak = (current_char == BLANK && current_state == NORMAL);
-        if(append){
-            token += ch;
+    for(int i = 0; i < command.size(); i++){
+        char ch = command[i];
+        switch (current_state) {
+        case NORMAL:
+            if(ch == '\''){
+                current_state = SINGLE_QUOTE_MODE;
+            }
+            else if(ch == '\"'){
+                current_state = DOUBLE_QUOTE_MODE;
+            }
+            else if(ch == ' '){
+                if(token.size() > 0){
+                    userInput.push_back(token);
+                    token = "";
+                }
+            }
+            else if(ch == '\\'){
+                // here assuming that there IS a character after the escape else the
+                // shell just waits for an extra character.
+                token += command[i+1];
+                i++;
+            }
+            else{
+                token += ch;
+            }
+            break;
+        case SINGLE_QUOTE_MODE:
+            if(ch == '\''){
+                current_state = NORMAL;
+            }
+            else{
+                token += ch;
+            }
+            break;
+        case DOUBLE_QUOTE_MODE:
+            if(ch == '\"'){
+                current_state = NORMAL;
+            }
+            else if(ch == '\\'){
+                if(i+1 < command.size() && command[i+1] == '\"' || 
+                command[i+1] == '\\' || command[i+1] == '$' || 
+                command[i+1] == '`'){
+                    token += command[i+1];
+                }
+                else{
+                    token += command[i];
+                    token += command[i+1];
+                }
+                i++;
+            }
+            else{
+                token += ch;
+            }
+            break;
         }
-        else if(toBreak){
-            if(token.size() > 0)
-                userInput.push_back(token);
-            token = "";
-        }
-        current_state = next_state;
     }
     if(token.size() > 0) userInput.push_back(token);
 }
+
 
 int main() {
     // Flush after every std::cout / std::cerr
