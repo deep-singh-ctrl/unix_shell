@@ -125,7 +125,7 @@ void runExecutableFilePath(std::vector<std::string> &userInput){
         }
     }
     if(!foundExecutable){
-        std::cout << executableName << ": command not found" << std::endl;
+        std::cerr << executableName << ": command not found" << std::endl;
     }
 }
 
@@ -184,7 +184,7 @@ int main() {
                 std::filesystem::current_path(new_directory);
             }
             else{
-                std::cout << "cd: " << new_directory.string() <<": No such file or directory" << std::endl; 
+                std::cerr << "cd: " << new_directory.string() <<": No such file or directory" << std::endl; 
             }
         }
         else if(command == "pwd"){
@@ -208,7 +208,7 @@ int main() {
                 const char* env_p = std::getenv("PATH");
 
                 if (env_p == nullptr) {
-                    std::cout << "Environment variable not found." << std::endl;
+                    std::cerr << "Environment variable not found." << std::endl;
                     return 1;
                 }
 
@@ -241,7 +241,7 @@ int main() {
                 }
 
                 if (!valid) {
-                    std::cout << command.substr(5) << ": not found" << std::endl;
+                    std::cerr << command.substr(5) << ": not found" << std::endl;
                 }
             }
             
