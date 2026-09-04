@@ -2,6 +2,8 @@
 #include <string>
 #include <filesystem>
 #include <vector>
+#include <algorithm>
+#include <fcntl.h>
 #include <sstream>
 #include <unistd.h>
 #include <sys/types.h>
@@ -12,55 +14,6 @@ enum parser_state {
     SINGLE_QUOTE_MODE,
     DOUBLE_QUOTE_MODE,
 };
-
-void runExecutableFilePath(std::vector<std::string> &userInput){
-    const char* env_p = std::getenv("PATH");
-    //WARNING : No error handling in case PATH does not exist
-    std::string env_val(env_p);
-    std::stringstream ss(env_val);
-    std::string token;
-    std::vector<char* > argv;
-    for(std::string &s : userInput){
-      argv.push_back(s.data());
-    }
-    // execv expects a NULL at the end of the argument list so we append one to argv.
-    argv.push_back(NULL);
-    char** argvPointer = argv.data();
-    // Use this argvPointer inside exec when you fork for a new process 
-    // For LINUX the delimiter for PATH directories is a colon
-    char delimiter = ':';
-    std::vector<std::string> results;
-
-    while (std::getline(ss, token, delimiter)) {
-        results.push_back(token);
-    }
-
-    bool foundExecutable = false;
-    namespace fs = std::filesystem;
-    for (std::string& s : results) {
-        fs::path filePath = s + "/" + userInput[0];
-        if (std::filesystem::exists(filePath)) {
-            
-            if ((fs::status(filePath).permissions() & fs::perms::owner_exec) != fs::perms::none ||
-                (fs::status(filePath).permissions() & fs::perms::others_exec) != fs::perms::none ||
-                (fs::status(filePath).permissions() & fs::perms::group_exec) != fs::perms::none) {
-                 foundExecutable = true;
-                 pid_t child = fork();
-                 // assuming that the child can ALWAYS be created.
-                 if(child == 0){
-                  execv(filePath.string().data(), argvPointer); 
-                 }
-                 else if(child > 0){
-                  waitpid(child, NULL, 0);
-                 }
-                 break;
-            }
-        }
-    }
-    if(!foundExecutable){
-        std::cout << userInput[0] << ": command not found" << std::endl;
-    }
-}
 
 void parseUserInput(std::vector<std::string> &userInput, 
     const std::string &command){
@@ -126,20 +79,101 @@ void parseUserInput(std::vector<std::string> &userInput,
 }
 
 
+void runExecutableFilePath(std::vector<std::string> &userInput){
+    const char* env_p = std::getenv("PATH");
+    //WARNING : No error handling in case PATH does not exist
+    std::string env_val(env_p);
+    std::stringstream ss(env_val);
+    std::string token;
+    std::vector<char* > argv;
+    for(std::string &s : userInput){
+      argv.push_back(s.data());
+    }
+    // execv expects a NULL at the end of the argument list so we append one to argv.
+    argv.push_back(NULL);
+    char** argvPointer = argv.data();
+    // Use this argvPointer inside exec when you fork for a new process 
+    // For LINUX the delimiter for PATH directories is a colon
+    char delimiter = ':';
+    std::vector<std::string> results;
+    
+    while (std::getline(ss, token, delimiter)) {
+        results.push_back(token);
+    }
+
+    bool foundExecutable = false;
+    namespace fs = std::filesystem;
+    std::string executableName = (userInput[0]);
+    for (std::string& s : results) {
+        fs::path filePath = s + "/" + executableName;
+        if (std::filesystem::exists(filePath)) {
+            
+            if ((fs::status(filePath).permissions() & fs::perms::owner_exec) != fs::perms::none ||
+                (fs::status(filePath).permissions() & fs::perms::others_exec) != fs::perms::none ||
+                (fs::status(filePath).permissions() & fs::perms::group_exec) != fs::perms::none) {
+                 foundExecutable = true;
+                 pid_t child = fork();
+                 // assuming that the child can ALWAYS be created.
+                 if(child == 0){
+                    execv(filePath.string().data(), argvPointer);
+                  }
+                 else if(child > 0){
+                  waitpid(child, NULL, 0);
+                 }
+                 break;
+            }
+        }
+    }
+    if(!foundExecutable){
+        std::cout << executableName << ": command not found" << std::endl;
+    }
+}
+
 int main() {
     // Flush after every std::cout / std::cerr
     std::cout << std::unitbuf;
     std::cerr << std::unitbuf;
-
     // TODO: Uncomment the code below to pass the first stage
     while (true) {
         std::cout << "$ ";
         std::string command;
         std::getline(std::cin, command);
         std::vector<std::string> userInput;
+        if (std::cin.eof()) {
+            break;
+        }
+
         // this helps us take care of single quotes, double quotes etc inside
         // the command.
         parseUserInput(userInput, command);
+        // i Do assume that a file name is provided for redirection
+        if(userInput.size() == 0){
+            continue;
+        }
+        int orig_stdout = dup(STDOUT_FILENO);
+        bool redirected = false;
+        
+        for(auto it = userInput.begin(); it != userInput.end(); ){
+            if(*it == ">" || *it == "1>"){
+                redirected = true;
+                int fd = open((*(it + 1)).c_str(), O_WRONLY | O_CREAT | O_TRUNC, 0644);
+                dup2(fd, STDOUT_FILENO);
+                close(fd);
+                userInput.erase(it, (it+2));
+                break;
+            }
+            else if(*it == ">>" || *it == "1>>"){
+                redirected = true;
+                int fd = open((*(it + 1)).c_str(), O_WRONLY | O_CREAT | O_APPEND, 0644);
+                dup2(fd, STDOUT_FILENO);
+                close(fd);
+                userInput.erase(it, (it+2));
+                break;
+            }
+            else {
+                it++;
+            }
+        }
         if (userInput[0] == "cd"){
             std::filesystem::path home_directory = std::getenv("HOME");
             if(userInput[1].substr(0,1) == "~"){
@@ -215,6 +249,11 @@ int main() {
             // Checking whether it's a executable
             runExecutableFilePath(userInput);
         }
+        if(redirected){
+            std::cout.flush();
+            dup2(orig_stdout, STDOUT_FILENO);
+        }
+        close(orig_stdout);
     }
     return 0;
 }
